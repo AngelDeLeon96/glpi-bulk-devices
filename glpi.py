@@ -36,39 +36,6 @@ class GLPIApi:
             return True
         raise Exception(f"Error al iniciar sesión: {response.text}")
 
-        """
-        Crea un nuevo ticket
-
-        Args:
-            datos_ticket (dict): Datos del ticket a crear
-        """
-        if not self.session_token:
-            raise Exception("No hay sesión iniciada")
-
-        headers = {
-            "Session-Token": self.session_token,
-            "App-Token": self.app_token,
-            "Content-Type": "application/json",
-        }
-
-        # Asegurarse de que los valores numéricos no se conviertan a string
-        datos_procesados = {}
-        for k, v in datos_ticket.items():
-            if isinstance(v, (int, float)):
-                datos_procesados[str(k)] = v
-            else:
-                datos_procesados[str(k)] = str(v)
-
-        response = requests.post(
-            f"{self.url_base}/apirest.php/Ticket",
-            headers=headers,
-            json=datos_procesados,
-        )
-
-        if response.status_code in [200, 201]:
-            return response.json()
-        raise Exception(f"Error al crear ticket: {response.text}")
-
     def crear_dispositivo(self, tipo_dispositivo, input_data):
         """
         Crea un nuevo dispositivo en GLPI
@@ -148,7 +115,7 @@ class GLPIApi:
             raise Exception("No hay sesión iniciada")
 
         headers = {"Session-Token": self.session_token, "App-Token": self.app_token}
-
+        print("my headers", headers)
         # Construir los parámetros de búsqueda
         search_params = {"criteria[0][link]": "AND"}
 
@@ -185,7 +152,7 @@ class GLPIApi:
                 params=search_params,
                 verify=False,
             )
-
+            print(response.url, response.headers)
             if response.status_code == 200:
                 data = response.json()
 
@@ -285,9 +252,11 @@ try:
 
     # Obtener modelos de computadora disponibles
     print("\nModelos de computadora disponibles:")
-    modelos = glpi.buscar_modelos({"model": "HP ProBook 445 G10"})
+    search_model = {"model": "HP ProBook 445 G7"}
 
-    print("founded: ", modelos)
+    modelos = glpi.buscar_modelos(search_model)
+
+    print("model founded: ", modelos["exists"])
 
     datos_computadora = {
         "name": "PC-001",
@@ -299,7 +268,7 @@ try:
         "is_dynamic": 0,  # 0 para inventario manual
     }
 
-    nueva_computadora = glpi.crear_dispositivo("Computer", datos_computadora)
+    # nueva_computadora = glpi.crear_dispositivo("Computer", datos_computadora)
     # print(f"Computadora creada con ID: {nueva_computadora}")
 
 except Exception as e:

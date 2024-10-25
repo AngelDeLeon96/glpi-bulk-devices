@@ -13,25 +13,40 @@ class GLPIDeviceImporter:
         self.root.title("Importador de Dispositivos GLPI")
         icon = tk.PhotoImage(file="logo.png")
         self.root.iconphoto(True, icon)
-        self.root.geometry("1000x650")
+        self.root.geometry("900x700")
 
         # Variables de control
         self.excel_path = tk.StringVar()
         self.base_url = tk.StringVar(value="http://10.14.35.145")
-        print("base url: ", self.base_url.get())
+        # print("base url: ", self.base_url.get())
         self.app_token = tk.StringVar(value="l1TqW2dIF38lxSPZstMzFFtDkrqzptV2H5BhdRxh")
         self.user_token = tk.StringVar(value="T99P59LLi8n1DIzTQBFT9uFt19kNQ0w4jiwsLgOH")
-        self.session_token = tk.StringVar()
-        self.headers = {
-            "Content-Type": "application/json",
-            "App-Token": self.app_token.get(),
-            "Authorization": f"user_token {self.user_token.get()}",
-        }
+        self.headers = {"App-Token": self.app_token.get()}
+        self.session_token = None
         # Crear el marco principal
         self.create_main_frame()
         # Variables para almacenar datos
         self.excel_data = None
         self.log_messages = []
+
+    def iniciar_sesion(self):
+        """
+        Inicia sesión en GLPI usando user_token
+        """
+        headers = {
+            "Content-Type": "application/json",
+            "App-Token": self.app_token.get(),
+            "Authorization": f"user_token {self.user_token.get()}",
+        }
+        print("iniciar sesion: ", headers)
+        response = requests.post(
+            f"{self.base_url.get()}/apirest.php/initSession", headers=headers
+        )
+        if response.status_code == 200:
+            self.session_token = str(response.json()["session_token"])
+            print("session token generated", self.session_token)
+            return True
+        raise Exception(f"Error al iniciar sesión: {response.text}")
 
     def create_main_frame(self):
         # Marco de configuración
@@ -197,25 +212,6 @@ class GLPIDeviceImporter:
             messagebox.showinfo("Éxito", "Validación exitosa")
             self.log_message("Validación exitosa")
 
-    def iniciar_sesion(self):
-        """
-        Inicia sesión en GLPI usando user_token
-        """
-        headers = {
-            "Content-Type": "application/json",
-            "App-Token": self.app_token,
-            "Authorization": f"user_token {self.user_token}",
-        }
-
-        response = requests.post(
-            f"{self.base_url}/apirest.php/initSession", headers=headers
-        )
-
-        if response.status_code == 200:
-            self.session_token = str(response.json()["session_token"])
-            return True
-        raise Exception(f"Error al iniciar sesión: {response.text}")
-
     def crear_dispositivo(self, tipo_dispositivo, input_data):
         """
         Crea un nuevo dispositivo en GLPI
@@ -255,46 +251,14 @@ class GLPIDeviceImporter:
             return response.json()
         raise Exception(f"Error al crear dispositivo: {response.text}")
 
-    def obtener_fabricantes(self):
-        """
-        Obtiene la lista de fabricantes
-        """
-        if not self.session_token:
-            raise Exception("No hay sesión iniciada")
-
-        headers = {"Session-Token": self.session_token, "App-Token": self.app_token}
-
-        response = requests.get(
-            f"{self.base_url}/apirest.php/Manufacturer", headers=headers
-        )
-        print("content: ", response.content)
-
-        if response.status_code == 200:
-            # Si la respuesta es un string, intentamos parsearlo como JSON
-            if isinstance(response.text, str):
-                try:
-                    return json.loads(response.text)
-                except json.JSONDecodeError:
-                    raise Exception("Error al decodificar la respuesta JSON")
-            return response.json()
-        raise Exception(
-            f"Error al obtener fabricantes: {response.status_code} - {response.text}"
-        )
-
     def buscar_modelos(self, search_criteria):
-        print(search_criteria)
-        """
-        Busca un modelo específico de computadora por nombre
-
-        Args:
-            nombre_modelo (str): Nombre del modelo a buscar
-
-        Returns:
-            dict: Información del modelo si se encuentra, None si no existe
-        """
+        print("criterio de busqueda:", search_criteria)
         if not self.session_token:
             raise Exception("No hay sesión iniciada")
+        else:
+            self.headers["Session_token"] = self.session_token
 
+        print("<==my headeres: ", self.headers)
         # Construir los parámetros de búsqueda
         search_params = {"criteria[0][link]": "AND"}
 
@@ -304,14 +268,6 @@ class GLPIDeviceImporter:
             "serial": 45,  # ID del campo serial
             "inventory": 31,  # ID del campo número de inventario
             "model": 40,  # ID del campo modelo
-        }
-        model_endpoints = {
-            "computadores": "/apirest.php/Computer",
-            "impresoras": "/apirest.php/Printer",
-            "monitores": "/apirest.php/Monitor",
-            "dispositivos_red": "/apirest.php/NetworkEquipment",
-            "perifericos": "/apirest.php/Peripheral",
-            "telefonos": "/apirest.php/Phone",
         }
         # Agregar criterios de búsqueda a los parámetros
         criterion_index = 0
@@ -325,17 +281,16 @@ class GLPIDeviceImporter:
                 criterion_index += 1
 
         try:
-            print(self.base_url.get())
             response = requests.get(
                 f"{self.base_url.get()}/apirest.php/search/Computer/",
                 headers=self.headers,
                 params=search_params,
                 verify=False,
             )
+            print(response.url, response.headers, response.json())
 
             if response.status_code == 200:
                 data = response.json()
-
                 # Verificar si se encontraron resultados
                 if data.get("totalcount", 0) > 0:
                     return {
@@ -358,7 +313,7 @@ class GLPIDeviceImporter:
                     "count": 0,
                     "data": [],
                     "message": f"Error en la búsqueda: {response.status_code}",
-                }
+                }, "datos incorrectos..."
 
         except requests.exceptions.RequestException as e:
             return {
@@ -367,38 +322,6 @@ class GLPIDeviceImporter:
                 "data": [],
                 "message": f"Error de conexión: {str(e)}",
             }
-
-    def obtener_ubicaciones(self):
-        """
-        Obtiene la lista de ubicaciones
-        """
-        if not self.session_token:
-            raise Exception("No hay sesión iniciada")
-
-        headers = {"Session-Token": self.session_token, "App-Token": self.app_token}
-
-        response = requests.get(
-            f"{self.base_url}/apirest.php/Location", headers=headers
-        )
-
-        if response.status_code == 200:
-            return response.json()
-        raise Exception(f"Error al obtener ubicaciones: {response.text}")
-
-    def obtener_estados(self):
-        """
-        Obtiene la lista de estados de dispositivos
-        """
-        if not self.session_token:
-            raise Exception("No hay sesión iniciada")
-
-        headers = {"Session-Token": self.session_token, "App-Token": self.app_token}
-
-        response = requests.get(f"{self.base_url}/apirest.php/State", headers=headers)
-
-        if response.status_code == 200:
-            return response.json()
-        raise Exception(f"Error al obtener estados: {response.text}")
 
     def cerrar_sesion(self):
         """
@@ -423,7 +346,16 @@ class GLPIDeviceImporter:
         self.log_messages.append(f"[{timestamp}] {message}")
 
     def import_to_glpi(self):
-        if not all([self.base_url.get(), self.app_token.get(), self.user_token.get()]):
+        self.iniciar_sesion()
+
+        if not all(
+            [
+                self.base_url.get(),
+                self.app_token.get(),
+                self.user_token.get(),
+                self.session_token,
+            ]
+        ):
             messagebox.showerror(
                 "Error", "Por favor complete todos los datos de conexión"
             )
@@ -432,14 +364,16 @@ class GLPIDeviceImporter:
         if self.excel_data is None:
             messagebox.showerror("Error", "Por favor cargue un archivo Excel primero")
             return
-
+        s = {"model": "HP ProBook 445 G7"}
+        modelo_id = self.buscar_modelos(s)
         try:
             success_count = 0
             error_count = 0
-
+            """
             for idx, row in self.excel_data.iterrows():
-                modelo_id = self.buscar_modelos({"model": row["modelo"]})
-                print(modelo_id["exits"])
+                s = {"model": "HP ProBook 445 G7"}
+                modelo_id = self.buscar_modelos(s)
+                print(modelo_id)
 
                 computer_data = {
                     "name": row["nombre"],
@@ -450,7 +384,7 @@ class GLPIDeviceImporter:
                     "computermodels_id": 1,  # ID del modelo
                     "is_dynamic": 0,  # 0 para inventario manual
                 }
-                """
+                
                 try:
                     response = requests.post(
                         f"{self.base_url.get()}/apirest.php/Computer/",
@@ -470,12 +404,12 @@ class GLPIDeviceImporter:
                 except Exception as e:
                     error_count += 1
                     self.log_message(f"Error en {row['name']}: {str(e)}")
-                """
+                
             messagebox.showinfo(
                 "Resultado",
                 f"Importación completada\nExitosos: {success_count}\nErrores: {error_count}",
             )
-
+            """
         except Exception as e:
             messagebox.showerror("Error", f"Error en la importación: {str(e)}")
             self.log_message(f"Error general: {str(e)}")
