@@ -45,6 +45,11 @@ class GLPIDeviceImporter:
         if response.status_code == 200:
             self.session_token = str(response.json()["session_token"])
             print("session token generated", self.session_token)
+            self.headers.clear()
+            self.headers = {
+                "Session-token": self.session_token,
+                "App-Token": self.app_token.get(),
+            }
             return True
         raise Exception(f"Error al iniciar sesión: {response.text}")
 
@@ -199,10 +204,8 @@ class GLPIDeviceImporter:
 
         for idx, row in self.excel_data.iterrows():
             for col_name in required_columns:
-                print()
-                """"
-                if pd.isna(row[name]):
-                    validation_errors.append(f"Fila {idx + 2}: {name} vacío")"""
+                if pd.isna(row[col_name]):
+                    validation_errors.append(f"Fila {idx + 2}: {col_name} vacío")
 
         if validation_errors:
             error_message = "\n".join(validation_errors)
@@ -251,23 +254,57 @@ class GLPIDeviceImporter:
             return response.json()
         raise Exception(f"Error al crear dispositivo: {response.text}")
 
-    def buscar_modelos(self, search_criteria):
-        print("criterio de busqueda:", search_criteria)
+    def buscar_modelos(self, search, tipo_dispositivo):
+        print("criterio de busqueda:", search)
+        search_criteria = {}
+        search_criteria["model"] = search
+
+        model_endpoints = {
+            "computer": "ComputerModel",
+            "printer": "PrinterModel",
+            "monitor": "MonitorModel",
+            "network": "NetworkEquipmentModel",
+            "peripheral": "PeripheralModel",
+            "phone": "PhoneModel",
+        }
+        # Mapeo de tipos de dispositivos a sus endpoints de creación
+        device_endpoints = {
+            "computer": "Computer",
+            "printer": "Printer",
+            "monitor": "Monitor",
+            "network": "NetworkEquipment",
+            "peripheral": "Peripheral",
+            "phone": "Phone",
+        }
+
         if not self.session_token:
             raise Exception("No hay sesión iniciada")
         else:
             self.headers["Session_token"] = self.session_token
 
-        print("<==my headeres: ", self.headers)
+        if tipo_dispositivo.lower() not in model_endpoints:
+            return {
+                "exists": False,
+                "model_id": None,
+                "message": f'Tipo de dispositivo no válido. Opciones válidas: {", ".join(model_endpoints.keys())}',
+            }
+
         # Construir los parámetros de búsqueda
         search_params = {"criteria[0][link]": "AND"}
 
         # Mapeo de campos para la búsqueda
         field_mapping = {
-            "name": 1,  # ID del campo nombre
-            "serial": 45,  # ID del campo serial
-            "inventory": 31,  # ID del campo número de inventario
-            "model": 40,  # ID del campo modelo
+            "name": 1,  # Nombre
+            "serial": 45,  # Número de serie
+            "id": 2,  # ID del dispositivo
+            "model": 40,  # Modelo
+            "location": 3,  # Ubicación
+            "user": 24,  # Usuario
+            "manufacturer": 23,  # Fabricante
+            "comment": 16,  # Comentarios
+            "status": 31,  # Estado
+            "type": 4,  # Tipo
+            "inventory_number": 46,  # Número de inventario
         }
         # Agregar criterios de búsqueda a los parámetros
         criterion_index = 0
@@ -281,32 +318,43 @@ class GLPIDeviceImporter:
                 criterion_index += 1
 
         try:
+            endpoint = model_endpoints[tipo_dispositivo.lower()]
+            self.log_message(f"Buscando modelo de {tipo_dispositivo}: {search}")
+
             response = requests.get(
                 f"{self.base_url.get()}/apirest.php/search/Computer/",
                 headers=self.headers,
                 params=search_params,
                 verify=False,
             )
-            print(response.url, response.headers, response.json())
 
             if response.status_code == 200:
-                data = response.json()
+                modelos = response.json()
                 # Verificar si se encontraron resultados
-                if data.get("totalcount", 0) > 0:
+                if isinstance(modelos, list) and len(modelos) > 0:
+                    # Buscar coincidencia exacta
+                    for modelo in modelos:
+                        if modelo.get("name", "").lower() == search.lower():
+                            return {
+                                "exists": True,
+                                "model_id": modelo.get("id"),
+                                "name": modelo.get("name"),
+                                "message": "Modelo encontrado",
+                            }
+
+                    # Si no hay coincidencia exacta, retornar el primer resultado
                     return {
                         "exists": True,
-                        "count": data.get("totalcount", 0),
-                        "data": data.get("data", []),
-                        "message": "Computador(es) encontrado(s)",
+                        "model_id": modelos[0].get("id"),
+                        "name": modelos[0].get("name"),
+                        "message": "Modelo similar encontrado",
                     }
                 else:
                     return {
                         "exists": False,
-                        "count": 0,
-                        "data": [],
-                        "message": "No se encontró ningún computador con los criterios especificados",
+                        "model_id": None,
+                        "message": "Modelo no encontrado",
                     }
-
             else:
                 return {
                     "exists": False,
@@ -328,10 +376,13 @@ class GLPIDeviceImporter:
         Cierra la sesión actual
         """
         if self.session_token:
-            headers = {"Session-Token": self.session_token, "App-Token": self.app_token}
+            headers = {
+                "Session-Token": self.session_token,
+                "App-Token": self.app_token.get(),
+            }
 
             response = requests.post(
-                f"{self.base_url}/apirest.php/killSession", headers=headers
+                f"{self.base_url.get()}/apirest.php/killSession", headers=headers
             )
 
             if response.status_code == 200:
@@ -364,12 +415,14 @@ class GLPIDeviceImporter:
         if self.excel_data is None:
             messagebox.showerror("Error", "Por favor cargue un archivo Excel primero")
             return
-        s = {"model": "HP ProBook 445 G7"}
-        modelo_id = self.buscar_modelos(s)
+
         try:
             success_count = 0
             error_count = 0
-            """
+            s = "HP ProBook 445 G9"
+            modelo_id = self.buscar_modelos(s)
+            self.log_message(f'{modelo_id["exists"]}')
+
             for idx, row in self.excel_data.iterrows():
                 s = {"model": "HP ProBook 445 G7"}
                 modelo_id = self.buscar_modelos(s)
@@ -384,7 +437,7 @@ class GLPIDeviceImporter:
                     "computermodels_id": 1,  # ID del modelo
                     "is_dynamic": 0,  # 0 para inventario manual
                 }
-                
+
                 try:
                     response = requests.post(
                         f"{self.base_url.get()}/apirest.php/Computer/",
@@ -404,15 +457,19 @@ class GLPIDeviceImporter:
                 except Exception as e:
                     error_count += 1
                     self.log_message(f"Error en {row['name']}: {str(e)}")
-                
+                finally:
+                    self.cerrar_sesion()
+
             messagebox.showinfo(
                 "Resultado",
                 f"Importación completada\nExitosos: {success_count}\nErrores: {error_count}",
             )
-            """
+
         except Exception as e:
             messagebox.showerror("Error", f"Error en la importación: {str(e)}")
             self.log_message(f"Error general: {str(e)}")
+        finally:
+            self.cerrar_sesion()
 
 
 def main():
