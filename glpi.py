@@ -155,23 +155,31 @@ class GLPIApi:
             print(response.url, response.headers)
             if response.status_code == 200:
                 data = response.json()
-
                 # Verificar si se encontraron resultados
-                if data.get("totalcount", 0) > 0:
-                    return {
-                        "exists": True,
-                        "count": data.get("totalcount", 0),
-                        "data": data.get("data", []),
-                        "message": "Computador(es) encontrado(s)",
-                    }
-                else:
-                    return {
-                        "exists": False,
-                        "count": 0,
-                        "data": [],
-                        "message": "No se encontró ningún computador con los criterios especificados",
-                    }
-
+                            if isinstance(modelos, list) and len(modelos) > 0:
+                # Buscar coincidencia exacta
+                for modelo in modelos:
+                    if modelo.get('name', '').lower() == nombre_modelo.lower():
+                        return {
+                            'exists': True,
+                            'model_id': modelo.get('id'),
+                            'name': modelo.get('name'),
+                            'message': 'Modelo encontrado'
+                        }
+                
+                # Si no hay coincidencia exacta, retornar el primer resultado
+                return {
+                    'exists': True,
+                    'model_id': modelos[0].get('id'),
+                    'name': modelos[0].get('name'),
+                    'message': 'Modelo similar encontrado'
+                }
+            else:
+                return {
+                    'exists': False,
+                    'model_id': None,
+                    'message': 'Modelo no encontrado'
+                }
             else:
                 return {
                     "exists": False,

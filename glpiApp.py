@@ -13,7 +13,16 @@ class GLPIDeviceImporter:
         self.root.title("Importador de Dispositivos GLPI")
         icon = tk.PhotoImage(file="logo.png")
         self.root.iconphoto(True, icon)
-        self.root.geometry("900x700")
+        ancho_ventana = 900
+        alto_ventana = 900
+        # Calcular la posición para centrar la ventana
+        ancho_pantalla = root.winfo_screenwidth()
+        alto_pantalla = root.winfo_screenheight()
+        pos_x = (ancho_pantalla // 2) - (ancho_ventana // 2)
+        pos_y = (alto_pantalla // 2) - (alto_ventana // 2)
+
+        # Configurar geometría de la ventana (ancho x alto + x + y)
+        self.root.geometry(f"{ancho_ventana}x{alto_ventana}+{pos_x}+{pos_y}")
 
         # Variables de control
         self.excel_path = tk.StringVar()
@@ -38,7 +47,7 @@ class GLPIDeviceImporter:
             "App-Token": self.app_token.get(),
             "Authorization": f"user_token {self.user_token.get()}",
         }
-        print("iniciar sesion: ", headers)
+
         response = requests.post(
             f"{self.base_url.get()}/apirest.php/initSession", headers=headers
         )
@@ -215,6 +224,140 @@ class GLPIDeviceImporter:
             messagebox.showinfo("Éxito", "Validación exitosa")
             self.log_message("Validación exitosa")
 
+    def buscar_dispositivos(
+        self,
+        tipo_dispositivo="Computer",
+        criterios={},
+        campos_mostrar=None,
+    ):
+        """
+        Realiza una búsqueda avanzada de dispositivos en GLPI
+
+        Args:
+            tipo_dispositivo (str): Tipo de dispositivo (Computer, Printer, Monitor, etc.)
+            criterios (dict): Criterios de búsqueda
+            campos_mostrar (list): Lista de IDs de campos a mostrar en el resultado
+
+        Returns:
+            dict: Resultado de la búsqueda
+        """
+        print("headerws", self.headers)
+        nombre_modelo = criterios["model"]
+        # Mapeo de campos comunes de búsqueda
+        campos_busqueda = {
+            "name": 1,  # Nombre
+            "serial": 45,  # Número de serie
+            "id": 2,  # ID del dispositivo
+            "model": 40,  # Modelo
+            "location": 3,  # Ubicación
+            "user": 24,  # Usuario
+            "manufacturer": 23,  # Fabricante
+            "comment": 16,  # Comentarios
+            "status": 31,  # Estado
+            "type": 4,  # Tipo
+            "inventory_number": 46,  # Número de inventario
+        }
+
+        # Parámetros base de búsqueda
+        search_params = {
+            "is_deleted": 0,  # No mostrar elementos eliminados
+            "as_map": 0,  # Formato detallado de respuesta
+        }
+
+        # Agregar criterios de búsqueda si existen
+        if criterios:
+            for idx, (campo, valor) in enumerate(criterios.items()):
+                if campo in campos_busqueda:
+                    search_params.update(
+                        {
+                            f"criteria[{idx}][link]": "AND" if idx > 0 else "",
+                            f"criteria[{idx}][field]": campos_busqueda[campo],
+                            f"criteria[{idx}][searchtype]": "contains",
+                            f"criteria[{idx}][value]": valor,
+                        }
+                    )
+
+        # Campos a mostrar en el resultado
+        default_fields = [1, 2, 45, 40, 3, 24, 23]  # Campos por defecto
+        fields_to_show = campos_mostrar if campos_mostrar else default_fields
+
+        # Agregar campos a mostrar
+        for idx, field_id in enumerate(fields_to_show):
+            search_params[f"forcedisplay[{idx}]"] = field_id
+
+        try:
+            # Realizar la búsqueda
+            response = requests.get(
+                f"{self.base_url.get()}/apirest.php/search/{tipo_dispositivo}/",
+                headers=self.headers,
+                params=search_params,
+                verify=False,
+            )
+
+            # Log de la petición para debugging
+            print(f"URL de búsqueda: {response.url}")
+            print(f"Parámetros: {search_params}")
+            print(f"Código de respuesta: {response.status_code}")
+
+            if response.status_code == 200:
+                try:
+                    modelos = response.json()
+                    print("modelos encontrados: ", modelos)
+                    # Formatear los resultados
+                    # Si encontramos modelos
+                    """
+                    if isinstance(modelos, list):
+                        # Buscar coincidencia exacta primero
+                        for modelo in modelos:
+                            if (
+                                modelo.get("name", "").lower()
+                                == criterios["model"].lower()
+                            ):
+                                return {
+                                    "success": True,
+                                    "model_id": modelo["id"],
+                                    "name": modelo["name"],
+                                    "message": "Modelo encontrado exactamente",
+                                }
+
+                        # Si no hay coincidencia exacta, buscar coincidencia parcial
+                        for modelo in modelos:
+                            if nombre_modelo.lower() in modelo.get("name", "").lower():
+                                return {
+                                    "success": True,
+                                    "model_id": modelo["id"],
+                                    "name": modelo["name"],
+                                    "message": "Modelo similar encontrado",
+                                }
+
+                        return {
+                            "success": False,
+                            "model_id": None,
+                            "message": f'No se encontró el modelo "{nombre_modelo}"',
+                        }
+                    """
+                except json.JSONDecodeError as e:
+                    self.log_message(f"Error decodificando JSON: {str(e)}")
+                    self.log_message(f"Respuesta raw: {response.text}")
+                    return {
+                        "success": False,
+                        "message": f"Error procesando la respuesta: {str(e)}",
+                    }
+            else:
+                error_msg = f"Error en la búsqueda (Código {response.status_code})"
+                try:
+                    error_data = response.json()
+                    error_msg += f": {error_data.get('message', '')}"
+                except:
+                    error_msg += f": {response.text}"
+
+                return {"success": False, "message": error_msg}
+
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Error de conexión: {str(e)}"
+            self.log_message(error_msg)
+            return {"success": False, "message": error_msg}
+
     def crear_dispositivo(self, tipo_dispositivo, input_data):
         """
         Crea un nuevo dispositivo en GLPI
@@ -254,123 +397,6 @@ class GLPIDeviceImporter:
             return response.json()
         raise Exception(f"Error al crear dispositivo: {response.text}")
 
-    def buscar_modelos(self, search, tipo_dispositivo):
-        print("criterio de busqueda:", search)
-        search_criteria = {}
-        search_criteria["model"] = search
-
-        model_endpoints = {
-            "computer": "ComputerModel",
-            "printer": "PrinterModel",
-            "monitor": "MonitorModel",
-            "network": "NetworkEquipmentModel",
-            "peripheral": "PeripheralModel",
-            "phone": "PhoneModel",
-        }
-        # Mapeo de tipos de dispositivos a sus endpoints de creación
-        device_endpoints = {
-            "computer": "Computer",
-            "printer": "Printer",
-            "monitor": "Monitor",
-            "network": "NetworkEquipment",
-            "peripheral": "Peripheral",
-            "phone": "Phone",
-        }
-
-        if not self.session_token:
-            raise Exception("No hay sesión iniciada")
-        else:
-            self.headers["Session_token"] = self.session_token
-
-        if tipo_dispositivo.lower() not in model_endpoints:
-            return {
-                "exists": False,
-                "model_id": None,
-                "message": f'Tipo de dispositivo no válido. Opciones válidas: {", ".join(model_endpoints.keys())}',
-            }
-
-        # Construir los parámetros de búsqueda
-        search_params = {"criteria[0][link]": "AND"}
-
-        # Mapeo de campos para la búsqueda
-        field_mapping = {
-            "name": 1,  # Nombre
-            "serial": 45,  # Número de serie
-            "id": 2,  # ID del dispositivo
-            "model": 40,  # Modelo
-            "location": 3,  # Ubicación
-            "user": 24,  # Usuario
-            "manufacturer": 23,  # Fabricante
-            "comment": 16,  # Comentarios
-            "status": 31,  # Estado
-            "type": 4,  # Tipo
-            "inventory_number": 46,  # Número de inventario
-        }
-        # Agregar criterios de búsqueda a los parámetros
-        criterion_index = 0
-        for field, value in search_criteria.items():
-            if field in field_mapping:
-                search_params[f"criteria[{criterion_index}][field]"] = field_mapping[
-                    field
-                ]
-                search_params[f"criteria[{criterion_index}][searchtype]"] = "contains"
-                search_params[f"criteria[{criterion_index}][value]"] = value
-                criterion_index += 1
-
-        try:
-            endpoint = model_endpoints[tipo_dispositivo.lower()]
-            self.log_message(f"Buscando modelo de {tipo_dispositivo}: {search}")
-
-            response = requests.get(
-                f"{self.base_url.get()}/apirest.php/search/Computer/",
-                headers=self.headers,
-                params=search_params,
-                verify=False,
-            )
-
-            if response.status_code == 200:
-                modelos = response.json()
-                # Verificar si se encontraron resultados
-                if isinstance(modelos, list) and len(modelos) > 0:
-                    # Buscar coincidencia exacta
-                    for modelo in modelos:
-                        if modelo.get("name", "").lower() == search.lower():
-                            return {
-                                "exists": True,
-                                "model_id": modelo.get("id"),
-                                "name": modelo.get("name"),
-                                "message": "Modelo encontrado",
-                            }
-
-                    # Si no hay coincidencia exacta, retornar el primer resultado
-                    return {
-                        "exists": True,
-                        "model_id": modelos[0].get("id"),
-                        "name": modelos[0].get("name"),
-                        "message": "Modelo similar encontrado",
-                    }
-                else:
-                    return {
-                        "exists": False,
-                        "model_id": None,
-                        "message": "Modelo no encontrado",
-                    }
-            else:
-                return {
-                    "exists": False,
-                    "count": 0,
-                    "data": [],
-                    "message": f"Error en la búsqueda: {response.status_code}",
-                }, "datos incorrectos..."
-
-        except requests.exceptions.RequestException as e:
-            return {
-                "exists": False,
-                "count": 0,
-                "data": [],
-                "message": f"Error de conexión: {str(e)}",
-            }
-
     def cerrar_sesion(self):
         """
         Cierra la sesión actual
@@ -398,7 +424,7 @@ class GLPIDeviceImporter:
 
     def import_to_glpi(self):
         self.iniciar_sesion()
-
+        dispositivos_dic = {}
         if not all(
             [
                 self.base_url.get(),
@@ -419,15 +445,8 @@ class GLPIDeviceImporter:
         try:
             success_count = 0
             error_count = 0
-            s = "HP ProBook 445 G9"
-            modelo_id = self.buscar_modelos(s)
-            self.log_message(f'{modelo_id["exists"]}')
-
+            count = 0
             for idx, row in self.excel_data.iterrows():
-                s = {"model": "HP ProBook 445 G7"}
-                modelo_id = self.buscar_modelos(s)
-                print(modelo_id)
-
                 computer_data = {
                     "name": row["nombre"],
                     "serial": row["serie"],
@@ -437,15 +456,24 @@ class GLPIDeviceImporter:
                     "computermodels_id": 1,  # ID del modelo
                     "is_dynamic": 0,  # 0 para inventario manual
                 }
-
                 try:
+                    count = count + 1
+                    print("searching ", row["tipo"])
+
+                    modelo_id = self.buscar_dispositivos(
+                        tipo_dispositivo=row["tipo"], criterios={"model": row["modelo"]}
+                    )
+
+                    # print(modelo_id)
+                    if count == 7:
+                        break
+                    """
                     response = requests.post(
                         f"{self.base_url.get()}/apirest.php/Computer/",
                         headers=self.headers,
                         json=computer_data,
                         verify=False,
                     )
-
                     if response.status_code in [200, 201]:
                         success_count += 1
                         self.log_message(f"Dispositivo creado: {row['name']}")
@@ -454,22 +482,20 @@ class GLPIDeviceImporter:
                         self.log_message(
                             f"Error al crear {row['name']}: {response.status_code}"
                         )
+                    """
                 except Exception as e:
                     error_count += 1
+                    print(e)
                     self.log_message(f"Error en {row['name']}: {str(e)}")
-                finally:
-                    self.cerrar_sesion()
 
-            messagebox.showinfo(
+                """messagebox.showinfo(
                 "Resultado",
                 f"Importación completada\nExitosos: {success_count}\nErrores: {error_count}",
-            )
+            )"""
 
         except Exception as e:
             messagebox.showerror("Error", f"Error en la importación: {str(e)}")
             self.log_message(f"Error general: {str(e)}")
-        finally:
-            self.cerrar_sesion()
 
 
 def main():
