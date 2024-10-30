@@ -53,7 +53,7 @@ class GLPIDeviceImporter:
         )
         if response.status_code == 200:
             self.session_token = str(response.json()["session_token"])
-            print("session token generated", self.session_token)
+            # print("session token generated", self.session_token)
             self.headers.clear()
             self.headers = {
                 "Session-token": self.session_token,
@@ -241,8 +241,9 @@ class GLPIDeviceImporter:
         Returns:
             dict: Resultado de la búsqueda
         """
-        print("headerws", self.headers)
+        # print("headerws", self.headers)
         nombre_modelo = criterios["model"]
+        print("model", nombre_modelo)
         # Mapeo de campos comunes de búsqueda
         campos_busqueda = {
             "name": 1,  # Nombre
@@ -296,8 +297,8 @@ class GLPIDeviceImporter:
 
             # Log de la petición para debugging
             print(f"URL de búsqueda: {response.url}")
-            print(f"Parámetros: {search_params}")
-            print(f"Código de respuesta: {response.status_code}")
+            # print(f"Parámetros: {search_params}")
+            # print(f"Código de respuesta: {response.status_code}")
 
             if response.status_code == 200:
                 try:
@@ -305,7 +306,7 @@ class GLPIDeviceImporter:
                     print("modelos encontrados: ", modelos)
                     # Formatear los resultados
                     # Si encontramos modelos
-                    """
+
                     if isinstance(modelos, list):
                         # Buscar coincidencia exacta primero
                         for modelo in modelos:
@@ -335,7 +336,7 @@ class GLPIDeviceImporter:
                             "model_id": None,
                             "message": f'No se encontró el modelo "{nombre_modelo}"',
                         }
-                    """
+
                 except json.JSONDecodeError as e:
                     self.log_message(f"Error decodificando JSON: {str(e)}")
                     self.log_message(f"Respuesta raw: {response.text}")
@@ -460,11 +461,11 @@ class GLPIDeviceImporter:
                     count = count + 1
                     print("searching ", row["tipo"])
 
-                    modelo_id = self.buscar_dispositivos(
+                    modelo_result = self.buscar_dispositivos(
                         tipo_dispositivo=row["tipo"], criterios={"model": row["modelo"]}
                     )
 
-                    # print(modelo_id)
+                    print(modelo_result)
                     if count == 7:
                         break
                     """
